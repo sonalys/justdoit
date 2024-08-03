@@ -1,0 +1,30 @@
+builder: .jdi.Dockerfile
+env:
+  var2: value2
+  var3: value3
+envFile: [.env]
+
+
+echo2:
+  run: echo aaaa!
+echo:
+  depends: [echo2]
+  run: echo It works!
+mocks:
+  depends: [echo, echo2]
+  defer: echo after
+  env:
+    # var1 is required, because it has no default value.
+    var1:
+    var2: value2
+  run: |
+    echo "var1: $var1"
+    echo "var2: $var2"
+    echo "Is var1 set?"
+    {{ if .Args.var1 }}
+    echo "var1 is set"
+    {{ else }}
+    echo "var1 is not set"
+    {{ end }}
+    echo "LS:"
+    ls
