@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 type Job struct {
@@ -31,11 +32,8 @@ func (j Job) Prepare(envs []string, args *StringMap) (runStmt, deferStmt string,
 }
 
 func prepareWithEnv(cmd string, envs []string) string {
-	envCmd := ""
-	for _, env := range envs {
-		envCmd += fmt.Sprintf("%s ", env)
-	}
-	return fmt.Sprintf("%s %s", envCmd, cmd)
+	envCmd := strings.Join(envs, " ")
+	return fmt.Sprintf("export %s\n%s", envCmd, cmd)
 }
 
 func runCmd(cmd string) error {

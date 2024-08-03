@@ -20,11 +20,9 @@ mocks:
   run: |
     echo "var1: $var1"
     echo "var2: $var2"
-    echo "Is var1 set?"
-    {{ if .Args.var1 }}
-    echo "var1 is set"
+    echo "Is Args.secret set?"
+    {{ if .Args.secret }}
+    echo "Args.secret is set to {{ .Args.secret }}"
     {{ else }}
-    echo "var1 is not set"
+    echo "Args.secret is not set"
     {{ end }}
-    echo "LS:"
-    ls

@@ -4,111 +4,51 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
 )
 
 type handler func(run func(string) error) error
 
 func runInteractiveContainer(ctx context.Context, imageName string, run handler) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %v", err)
-	}
-
-	// Get the current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current working directory: %v", err)
 	}
 
-	// Create container configuration
-	containerConfig := &container.Config{
-		Image:      imageName,
-		WorkingDir: cwd,
-		OpenStdin:  true,
+	args := []string{
+		"run",
+		"-i",
+		"--rm",
+		"--privileged",
+		"-v", fmt.Sprintf("%s:%s", cwd, cwd),
+		"-w", cwd,
+		"-u", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		imageName,
 	}
 
-	// Create host configuration
-	hostConfig := &container.HostConfig{
-		Privileged: true,
-		AutoRemove: true,
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: cwd,
-				Target: cwd,
-			},
-		},
-	}
+	// Run the container
+	cmd := exec.CommandContext(ctx, "docker", args...)
 
-	// Create the container
-	resp, err := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	r, w, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("failed to create container: %v", err)
+		return fmt.Errorf("failed to create pipe: %v", err)
 	}
+	defer w.Close()
 
-	// Attach to the container
-	hijackedResp, err := cli.ContainerAttach(context.Background(), resp.ID, container.AttachOptions{
-		Stream: true,
-		Stdin:  true,
-		Stdout: true,
-		Stderr: true,
-		Logs:   false,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to attach to container: %v", err)
-	}
-	defer hijackedResp.Close()
-	// go io.Copy(os.Stdout, hijackedResp.Reader)
+	cmd.Stdin = r
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-	// Start the container
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start Docker container: %v", err)
-	}
+	go func() {
+		run(func(cmd string) error {
+			_, err := fmt.Fprintln(w, cmd)
+			return err
+		})
+		w.WriteString("exit\n")
+	}()
 
-	err = run(func(cmd string) error {
-		if cmd == "" {
-			return nil
-		}
-		if _, err := hijackedResp.Conn.Write([]byte(cmd + "\n")); err != nil {
-			return fmt.Errorf("failed to write command to container: %v", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	out, err := cli.ContainerLogs(ctx, resp.ID, container.LogsOptions{
-		ShowStdout: true,
-		Follow:     true,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get container logs: %v", err)
-	}
-	defer out.Close()
-	go io.Copy(os.Stdout, out)
-
-	hijackedResp.Conn.Write([]byte("exit\n"))
-
-	timeout := 2
-	cli.ContainerStop(ctx, resp.ID, container.StopOptions{
-		Timeout: &timeout,
-	})
-
-	wr, errch := cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
-	select {
-	case <-wr:
-	case <-errch:
-	case <-ctx.Done():
-	}
-	return nil
+	return cmd.Run()
 }
 
 func buildDockerImage(dockerfilePath, imageName string) error {

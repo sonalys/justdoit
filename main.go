@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
@@ -112,7 +113,10 @@ func main() {
 		deferStmts = append(deferStmts, deferStmt)
 	}
 
-	err = runInteractiveContainer(context.Background(), "justdoit", func(run func(string) error) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	defer cancel()
+
+	err = runInteractiveContainer(ctx, "justdoit", func(run func(string) error) error {
 		for i := range runStmts {
 			err := run(runStmts[i])
 			run(deferStmts[i])
